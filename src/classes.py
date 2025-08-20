@@ -1,19 +1,20 @@
 import psycopg2
-from psycopg2 import sql, extras, OperationalError
-import json
+from psycopg2 import OperationalError
 import configparser
 import os
+from typing import Dict
 
 
 class DBManager:
+    # Создаем класс
     def __init__(self, config_path: str):
         if not os.path.exists(config_path):
             raise FileNotFoundError(f"Конфигурационный файл {config_path} не найден")
         self.config_path = config_path
-        self.connection = None
         self.params = self.load_config()
 
     def load_config(self) -> dict:
+        # Создаем подключение к базе данных
         config = configparser.ConfigParser()
         try:
             config.read(self.config_path)
@@ -34,7 +35,8 @@ class DBManager:
             print(f"Ошибка при загрузке конфигурации: {e}")
             return {}
 
-    def connect(self):
+    def connect(self) -> None:
+        # Подключаемся к базе данных
         try:
             self.connection = psycopg2.connect(**self.params)
             self.connection.autocommit = True
@@ -45,24 +47,18 @@ class DBManager:
         if self.connection:
             self.connection.close()
 
-    def get_companies_and_vacancies_count(self, org_ids: list[str]) -> list[dict]:
-        """Получает список всех компаний и количество вакансий у каждой компании"""
+    def get_companies_and_vacancies_count(self, org_ids: list[str]) -> list[Dict[str, int]]:
+        """Получаем список всех компаний и количество вакансий у каждой компании"""
+        if not self.connection:
+            raise Exception("Соединение с базой данных не установлено")
         placeholders = ', '.join(['%s'] * len(org_ids))
 
-        query = f"""
-            SELECT 
-                e.name AS company_name,
-                COUNT(v.id) AS vacancies_count
-            FROM 
-                employers e
-            LEFT JOIN 
-                vacancies v ON e.id = v.employer_id
-            WHERE 
-                e.id IN ({placeholders})
-            GROUP BY 
-                e.name
-            ORDER BY 
-                vacancies_count DESC
+        query = f"""SELECT e.name AS company_name, COUNT(v.id) AS vacancies_count
+                    FROM employers e
+                    LEFT JOIN vacancies v ON e.id = v.employer_id
+                    WHERE e.id IN ({placeholders})
+                    GROUP BY e.name
+                    ORDER BY vacancies_count DESC
             """
         try:
             with self.connection.cursor() as cursor:
@@ -74,19 +70,11 @@ class DBManager:
             return []
 
     def get_all_vacancies(self) -> list[dict]:
-        """Получает список всех вакансий с указанием названия компании, названия вакансии и зарплаты"""
-        query = """
-        SELECT 
-            e.name AS company_name,
-            v.name AS vacancy_name,
-            v.salary,
-            v.url
-        FROM 
-            vacancies v
-        JOIN 
-            employers e ON v.employer_id = e.id
-        ORDER BY 
-            company_name
+        """Получаем список всех вакансий с указанием названия компании, названия вакансии и зарплаты"""
+        query = """SELECT e.name AS company_name, v.name AS vacancy_name, v.salary, v.url
+                    FROM vacancies v
+                    JOIN employers e ON v.employer_id = e.id
+                    ORDER BY company_name
         """
         try:
             with self.connection.cursor() as cursor:
@@ -103,14 +91,10 @@ class DBManager:
             return []
 
     def get_avg_salary(self) -> float:
-        """Получает среднюю зарплату по всем вакансиям"""
-        query = """
-        SELECT 
-            AVG((salary->>'from')::numeric) AS avg_salary
-        FROM 
-            vacancies
-        WHERE 
-            salary->>'from' IS NOT NULL
+        """Получаем среднюю зарплату по всем вакансиям"""
+        query = """SELECT AVG((salary->>'from')::numeric) AS avg_salary
+                    FROM vacancies
+                    WHERE salary->>'from' IS NOT NULL
         """
         try:
             with self.connection.cursor() as cursor:
@@ -122,22 +106,13 @@ class DBManager:
             return 0.0
 
     def get_vacancies_with_higher_salary(self) -> list[dict]:
-        """Получает список всех вакансий, у которых зарплата выше средней"""
+        """Получаем список всех вакансий, у которых зарплата выше средней"""
         avg_salary = self.get_avg_salary()
-        query = f"""
-        SELECT 
-            e.name AS company_name,
-            v.name AS vacancy_name,
-            v.salary,
-            v.url
-        FROM 
-            vacancies v
-        JOIN 
-            employers e ON v.employer_id = e.id
-        WHERE 
-            ((v.salary->>'from')::numeric > {avg_salary})
-        ORDER BY 
-            (v.salary->>'from')::numeric DESC
+        query = f"""SELECT e.name AS company_name, v.name AS vacancy_name, v.salary, v.url
+                    FROM vacancies v
+                    JOIN employers e ON v.employer_id = e.id
+                    WHERE ((v.salary->>'from')::numeric > {avg_salary})
+                    ORDER BY (v.salary->>'from')::numeric DESC
         """
         try:
             with self.connection.cursor() as cursor:
@@ -146,7 +121,7 @@ class DBManager:
                 return [{
                     'company_name': row[0],
                     'vacancy_name': row[1],
-                    'salary': row[2],  # Убрали json.loads
+                    'salary': row[2],
                     'url': row[3]
                 }
                     for row in result]
@@ -155,34 +130,36 @@ class DBManager:
             return []
 
     def get_vacancies_with_keyword(self, keyword: str) -> list[dict]:
-        """Получает список всех вакансий, в названии которых содержатся переданные слова"""
-        query = """
-        SELECT 
-            e.name AS company_name,
-            v.name AS vacancy_name,
-            v.salary,
-            v.url
-        FROM 
-            vacancies v
-        JOIN 
-            employers e ON v.employer_id = e.id
-        WHERE 
-            LOWER(v.name) LIKE %s
-        ORDER BY 
-            company_name
+        """Получаем список всех вакансий, в названии которых содержатся переданные слова"""
+        if not keyword.strip():
+            print("Ключевое слово не может быть пустым")
+            return []
+
+        query = """SELECT e.name AS company_name, v.name AS vacancy_name, v.salary, v.url
+        FROM vacancies v
+        JOIN employers e ON v.employer_id = e.id
+        WHERE LOWER(v.name) LIKE %s
+        ORDER BY company_name
         """
+
         try:
             with self.connection.cursor() as cursor:
-                # Используем % для поиска подстроки
+                # Удаляем лишние пробелы и приводим к нижнему регистру
                 search_pattern = f"%{keyword.lower()}%"
+
                 cursor.execute(query, (search_pattern,))
                 result = cursor.fetchall()
+
+                if not result:
+                    print("Вакансии по данному ключевому слову не найдены")
+                    return []
+
                 return [
                     {
-                        'company_name': row[0],
-                        'vacancy_name': row[1],
-                        'salary': json.loads(row[2]),
-                        'url': row[3]
+                        'company_name': row[0] if len(row) > 0 else 'Не указано',
+                        'vacancy_name': row[1] if len(row) > 1 else 'Не указано',
+                        'salary': row[2] if isinstance(row[2], dict) else {},  # Проверяем тип
+                        'url': row[3] if len(row) > 3 else 'Не указано'
                     }
                     for row in result
                 ]
@@ -196,6 +173,7 @@ class DBManager:
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
+
 
 # Пример использования класса
 if __name__ == "__main__":
@@ -225,8 +203,8 @@ if __name__ == "__main__":
             print(high_salary_vacancies)
 
             # Получение вакансий по ключевому слову
-            keyword_vacancies = db.get_vacancies_with_keyword("python")
-            print("\nВакансии с ключевым словом 'python':")
+            keyword_vacancies = db.get_vacancies_with_keyword("keyword")
+            print("\nВакансии с ключевым словом {'keyword'}:")
             print(keyword_vacancies)
     except Exception as e:
         print(f"Произошла ошибка: {e}")
