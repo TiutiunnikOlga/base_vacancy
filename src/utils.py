@@ -10,8 +10,11 @@ import json
 
 def get_vacancies(org_ids: list[str], query: str="") -> list[dict[str, Any]]:
     """Получение данных о вакансиях интересующих организаций"""
+    if not org_ids:
+        print("Список организаций пуст")
+        return []
     params = {
-        "id": ",".join(org_ids),  # Добавляем ID организаций в параметры
+        "id": ",".join(org_ids),
         "text": query,
         "per_page": 100,  # Количество вакансий на странице
         "page": 0  # Начальная страница
@@ -26,35 +29,36 @@ def get_vacancies(org_ids: list[str], query: str="") -> list[dict[str, Any]]:
         return []
 
 
-def create_database(database_name: str, params: dict) -> None:
+def create_database(database_name: str, params: dict, org_ids: list[str] = []) -> None:
     """Создание базы данных для сохранения интересующих вакансий"""
     try:
-        # Устанавливаем соединение с базой данных
-        conn = psycopg2.connect(dbname='postgres', **params)
+        # Создаем копию параметров без dbname для подключения к postgres
+        base_params = {k: v for k, v in params.items() if k != 'dbname'}
+
+        # Устанавливаем соединение с базой данных postgres
+        conn = psycopg2.connect(dbname='postgres', **base_params)
         conn.autocommit = True
         cur = conn.cursor()
+
         cur.execute(
             "SELECT 1 FROM pg_database WHERE datname = %s",
             (database_name,)
         )
 
         if cur.fetchone():
-            print(f"База данных {database_name} уже существует")
             # Если база существует, удаляем её
             cur.execute(sql.SQL("DROP DATABASE {}").format(
                 sql.Identifier(database_name)
             ))
-            print(f"База данных {database_name} удалена")
 
         cur.execute(f'CREATE DATABASE {database_name}')
-
         cur.close()
         conn.close()
 
-        conn = psycopg2.connect(dbname=database_name, **params)
+        # Обновляем параметры с новым именем базы данных
+        params['dbname'] = database_name
 
-            # Создаем таблицу для хранения вакансий
-        with psycopg2.connect(dbname=database_name, **params) as conn:
+        with psycopg2.connect(**params) as conn:
             with conn.cursor() as cur:
                 # Основная таблица вакансий
                 cur.execute('''
@@ -69,7 +73,7 @@ def create_database(database_name: str, params: dict) -> None:
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         published_at TIMESTAMP
                     )
-                    ''')
+                ''')
 
                 # Таблица работодателей
                 cur.execute('''
@@ -80,7 +84,7 @@ def create_database(database_name: str, params: dict) -> None:
                         alternate_url VARCHAR(255),
                         logo_urls JSONB
                     )
-                    ''')
+                ''')
 
                 # Таблица требований и обязанностей
                 cur.execute('''
@@ -90,17 +94,19 @@ def create_database(database_name: str, params: dict) -> None:
                         responsibility TEXT,
                         FOREIGN KEY (vacancy_id) REFERENCES vacancies(id)
                     )
-                    ''')
-
-        conn.close()
+                ''')
 
     except OperationalError as e:
         print(f"Ошибка при создании базы данных: {e}")
 
 
 def save_data_to_database(data: list[dict[str, Any]], database_name: str, params: dict) -> None:
+    # Создаем копию параметров без dbname
+    base_params = {k: v for k, v in params.items() if k != 'dbname'}
+
     try:
-        conn = psycopg2.connect(dbname=database_name, **params)
+        # Передаем только необходимые параметры
+        conn = psycopg2.connect(dbname=database_name, **base_params)
         conn.autocommit = True
 
         with conn.cursor() as cur:
@@ -157,5 +163,5 @@ def save_data_to_database(data: list[dict[str, Any]], database_name: str, params
     except psycopg2.Error as e:
         print(f"Ошибка подключения к базе данных: {str(e)}")
     finally:
-        if conn:
+        if 'conn' in locals() and conn:
             conn.close()
