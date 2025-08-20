@@ -1,19 +1,18 @@
-from typing import Any
+from typing import Any, Dict
 import requests
 from requests.exceptions import RequestException
 import psycopg2
-from psycopg2 import sql, extras
+from psycopg2 import sql
 from psycopg2 import OperationalError
 import json
 
 
-
-def get_vacancies(org_ids: list[str], query: str="") -> list[dict[str, Any]]:
+def get_vacancies(org_ids: list[str], query: str = "") -> list[Dict[str, Any]]:
     """Получение данных о вакансиях интересующих организаций"""
     if not org_ids:
         print("Список организаций пуст")
         return []
-    params = {
+    params: Dict[str, Any] = {
         "id": ",".join(org_ids),
         "text": query,
         "per_page": 100,  # Количество вакансий на странице
