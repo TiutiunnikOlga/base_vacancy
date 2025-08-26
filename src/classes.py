@@ -6,7 +6,7 @@ from typing import Dict
 
 
 class DBManager:
-    # Создаем класс
+    # Создаем класс для работы с вакансиями с помощью Postgre SQL
     def __init__(self, config_path: str):
         if not os.path.exists(config_path):
             raise FileNotFoundError(f"Конфигурационный файл {config_path} не найден")
